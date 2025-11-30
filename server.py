@@ -1,4 +1,5 @@
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # Windows-specific fix: Add PyTorch library path to find CUDA DLLs for CTranslate2
 if os.name == 'nt':
