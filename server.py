@@ -1,3 +1,21 @@
+import os
+
+# Windows-specific fix: Add PyTorch library path to find CUDA DLLs for CTranslate2
+if os.name == 'nt':
+    import site
+    try:
+        site_packages = site.getsitepackages()[0]
+        torch_lib_path = os.path.join(site_packages, "torch", "lib")
+        
+        if os.path.exists(torch_lib_path):
+            os.environ["PATH"] = torch_lib_path + os.pathsep + os.environ.get("PATH", "")
+            os.add_dll_directory(torch_lib_path)
+            print(f"Loaded CUDA DLLs from: {torch_lib_path}")
+        else:
+            print("Warning: torch/lib directory not found. Ensure PyTorch with CUDA is installed.")
+    except Exception as e:
+        print(f"Warning: Error configuring DLL path: {e}")
+
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
