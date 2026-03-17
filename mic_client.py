@@ -3,6 +3,7 @@ import json
 import logging
 import signal
 import sys
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -36,6 +37,11 @@ async def recv_transcripts(websocket):
             elif msg_type == "PartialTranscript":
                 # Print partial on same line
                 print(f"\r{ text }", end="", flush=True)
+            elif msg_type == "Pong":
+                t = data.get("t", 0)
+                if t:
+                    rtt = int(time.time() * 1000) - t
+                    print(f"\r[PING] {rtt} ms", end="", flush=True)
     except websockets.exceptions.ConnectionClosed:
         logger.info("\nServer closed the connection.")
     except asyncio.CancelledError:
@@ -88,6 +94,17 @@ async def send_mic_audio(websocket):
             logger.info("Stopping microphone stream...")
 
 
+async def send_ping(websocket, stop_event):
+    """Send periodic ping messages to measure latency."""
+    try:
+        while not stop_event.is_set():
+            t = int(time.time() * 1000)
+            await websocket.send(json.dumps({"type": "ping", "t": t}))
+            await asyncio.sleep(3)
+    except (websockets.exceptions.ConnectionClosed, asyncio.CancelledError):
+        pass
+
+
 async def main():
     stop_event = asyncio.Event()
 
@@ -109,9 +126,10 @@ async def main():
 
             recv_task = asyncio.create_task(recv_transcripts(websocket))
             send_task = asyncio.create_task(send_mic_audio(websocket))
+            ping_task = asyncio.create_task(send_ping(websocket, stop_event))
 
             done, pending = await asyncio.wait(
-                {recv_task, send_task, stop_event.wait()},
+                {recv_task, send_task, ping_task, stop_event.wait()},
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
