@@ -53,10 +53,73 @@ String pendingDisplayText = "";      // New text waiting to be displayed
 bool isAnimating = false;            // Animation in progress
 unsigned long lastAnimationTime = 0;
 int animationCharIndex = 0;
+int animationCodepointCount = 0;
 const int ANIMATION_DELAY_MS = 50;   // Delay between characters
 
 // Display mode: true = translated, false = original (thô)
 bool displayTranslated = false;
+
+int utf8CharLen(uint8_t firstByte)
+{
+  if ((firstByte & 0x80) == 0x00)
+  {
+    return 1;
+  }
+  if ((firstByte & 0xE0) == 0xC0)
+  {
+    return 2;
+  }
+  if ((firstByte & 0xF0) == 0xE0)
+  {
+    return 3;
+  }
+  if ((firstByte & 0xF8) == 0xF0)
+  {
+    return 4;
+  }
+  return 1;
+}
+
+int countUtf8Codepoints(const String &text)
+{
+  int count = 0;
+  int i = 0;
+  const int n = text.length();
+  while (i < n)
+  {
+    int charLen = utf8CharLen((uint8_t)text.charAt(i));
+    if (i + charLen > n)
+    {
+      charLen = 1;
+    }
+    i += charLen;
+    count++;
+  }
+  return count;
+}
+
+String utf8Prefix(const String &text, int codepointCount)
+{
+  if (codepointCount <= 0)
+  {
+    return "";
+  }
+
+  int i = 0;
+  int seen = 0;
+  const int n = text.length();
+  while (i < n && seen < codepointCount)
+  {
+    int charLen = utf8CharLen((uint8_t)text.charAt(i));
+    if (i + charLen > n)
+    {
+      charLen = 1;
+    }
+    i += charLen;
+    seen++;
+  }
+  return text.substring(0, i);
+}
 
 void queueDisplayText(const String &text)
 {
@@ -74,6 +137,7 @@ void queueDisplayText(const String &text)
   pendingDisplayText = text;
   isAnimating = true;
   animationCharIndex = 0;
+  animationCodepointCount = countUtf8Codepoints(text);
 }
 
 // Setup I2S peripheral and OLED display, including I2C bus initialization
@@ -217,24 +281,31 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 void wrapText(String text, std::vector<String>& lines, int maxWidth) {
   lines.clear();
   String currentLine = "";
-  int lineHeight = u8g2.getMaxCharHeight();
   
-  for (unsigned int i = 0; i < text.length(); i++) {
-    char c = text.charAt(i);
-    String testLine = currentLine + c;
-    int width = u8g2.getStrWidth(testLine.c_str());
+  for (int i = 0; i < text.length();) {
+    int charLen = utf8CharLen((uint8_t)text.charAt(i));
+    if (i + charLen > text.length()) {
+      charLen = 1;
+    }
+
+    String ch = text.substring(i, i + charLen);
+    bool isNewline = (charLen == 1 && ch.charAt(0) == '\n');
+    String testLine = currentLine + ch;
+    int width = u8g2.getUTF8Width(testLine.c_str());
     
-    if (c == '\n' || width > maxWidth) {
+    if (isNewline || width > maxWidth) {
       if (currentLine.length() > 0) {
         lines.push_back(currentLine);
         currentLine = "";
       }
-      if (c != '\n') {
-        currentLine = String(c);
+      if (!isNewline) {
+        currentLine = ch;
       }
     } else {
       currentLine = testLine;
     }
+
+    i += charLen;
   }
   
   if (currentLine.length() > 0) {
@@ -284,6 +355,7 @@ void updateAnimation() {
     // Start new animation
     currentDisplayText = pendingDisplayText;
     animationCharIndex = 0;
+    animationCodepointCount = countUtf8Codepoints(currentDisplayText);
   }
   
   // Perform animation step
@@ -291,8 +363,8 @@ void updateAnimation() {
     if (currentTime - lastAnimationTime >= ANIMATION_DELAY_MS) {
       lastAnimationTime = currentTime;
       
-      // Get partial text up to current character index
-      String partialText = currentDisplayText.substring(0, animationCharIndex + 1);
+      // Get partial UTF-8-safe text up to current codepoint index
+      String partialText = utf8Prefix(currentDisplayText, animationCharIndex + 1);
       
       // Display with overflow protection
       displayAnimatedText(partialText);
@@ -301,7 +373,7 @@ void updateAnimation() {
       animationCharIndex++;
       
       // Check if animation is complete
-      if (animationCharIndex >= currentDisplayText.length()) {
+      if (animationCharIndex >= animationCodepointCount) {
         isAnimating = false;
       }
     }
@@ -317,6 +389,7 @@ void setup()
 
   // Initialize OLED font to support Vietnamese characters
   u8g2.setFont(u8g2_font_unifont_t_vietnamese2);
+  u8g2.enableUTF8Print();
   u8g2.setFontMode(0);     // Transparent background for text
   u8g2.clearBuffer();
   u8g2.setCursor(0, 15);

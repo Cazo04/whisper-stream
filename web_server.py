@@ -110,6 +110,8 @@ async def websocket_audio_endpoint(websocket: WebSocket):
         import websockets
         logger.info(f"Browser {client_id}: Connecting to backend {BACKEND_STREAMING_SERVER}")
         backend_ws = await websockets.connect(BACKEND_STREAMING_SERVER)
+        # Send identification frame to backend.
+        await backend_ws.send(json.dumps({"client_type": "browser"}))
         
         # Wait for handshake from backend
         try:
@@ -266,6 +268,8 @@ async def websocket_esp_endpoint(websocket: WebSocket):
         import websockets
         logger.info(f"ESP {client_id}: Connecting to backend {BACKEND_STREAMING_SERVER}")
         backend_ws = await websockets.connect(BACKEND_STREAMING_SERVER)
+        # Send identification frame to backend.
+        await backend_ws.send(json.dumps({"client_type": "esp"}))
         
         # Wait for handshake from backend
         try:

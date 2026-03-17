@@ -272,6 +272,17 @@ async def websocket_endpoint(websocket: WebSocket):
             elif "text" in message:
                 try:
                     msg = json.loads(message["text"])
+
+                    # Safe dynamic client classification: allow upgrade from
+                    # unknown/browser to ESP when explicit marker arrives late.
+                    if "client_type" in msg and not is_esp_client:
+                        reported_type = msg.get("client_type")
+                        if reported_type == "esp" and client_type != "esp":
+                            logger.info(f"Client classification updated: {client_type} -> esp")
+                            client_type = "esp"
+                            is_esp_client = True
+                            active_esp_connection = websocket
+
                     msg_type = msg.get("type")
                     if msg_type == "ping":
                         logger.debug(f"Ping received: t={msg.get('t')}")
