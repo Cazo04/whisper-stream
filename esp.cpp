@@ -183,11 +183,13 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
   {
   case WStype_DISCONNECTED:
     Serial.println("Disconnected!");
+    isStarted = false;  // Require explicit esp_start after reconnect
     queueDisplayText("Disconnected!");
     break;
 
   case WStype_CONNECTED:
     Serial.printf("Connected to url: %s\n", payload);
+    isStarted = false;  // Start state is controlled by server command
     // Send client type identification
     webSocket.sendTXT("{\"client_type\": \"esp\"}");
     queueDisplayText("Connected!");
@@ -266,6 +268,11 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
   }
 
   case WStype_BIN:
+  case WStype_ERROR:
+    Serial.println("WebSocket error");
+    isStarted = false;
+    queueDisplayText("WS error");
+    break;
   default:
     break;
   }

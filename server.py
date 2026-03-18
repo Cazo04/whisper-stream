@@ -109,6 +109,9 @@ async def websocket_endpoint(websocket: WebSocket):
         {"message_type": "SessionBegins", "session_id": str(id(websocket)), "client_type": client_type}
     )
 
+    if is_esp_client:
+        await send_runtime_config(websocket)
+
     assert whisper_engine is not None
     session = StreamingSession(engine=whisper_engine)
 
@@ -140,6 +143,17 @@ async def websocket_endpoint(websocket: WebSocket):
         except Exception:
             # Drop stale connection references if send fails.
             active_esp_connection = None
+
+    async def send_runtime_config(target_ws: WebSocket):
+        await target_ws.send_json({
+            "message_type": "RuntimeConfig",
+            "esp_display_mode": runtime_esp_display_mode,
+            "translate": runtime_translate,
+            "target_lang": runtime_target_lang,
+            "source_lang": runtime_source_lang,
+            "context_max": runtime_context_max,
+            "display_fallback": runtime_display_fallback,
+        })
 
     async def push_display_to_esp(text: str, mode: str):
         if not text:
@@ -275,6 +289,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             client_type = "esp"
                             is_esp_client = True
                             active_esp_connection = websocket
+                            await send_runtime_config(websocket)
 
                     msg_type = msg.get("type")
                     if msg_type == "ping":
