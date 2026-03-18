@@ -128,12 +128,6 @@ void queueDisplayText(const String &text)
     return;
   }
 
-  // Skip redraw if same content is already fully displayed or currently animating.
-  if ((!isAnimating && text == currentDisplayText) || text == pendingDisplayText)
-  {
-    return;
-  }
-
   pendingDisplayText = text;
   isAnimating = true;
   animationCharIndex = 0;

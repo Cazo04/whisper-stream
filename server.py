@@ -53,7 +53,6 @@ translator_engine: TranslatorEngine | None = None
 
 # Store active ESP session for broadcasting to browser
 active_esp_connection: WebSocket | None = None
-last_esp_display_fingerprint: str | None = None
 
 # Shared runtime config controlled by WebUI.
 runtime_translate = False
@@ -78,7 +77,6 @@ async def startup_event():
 @app.websocket("/v1/streaming")
 async def websocket_endpoint(websocket: WebSocket):
     global active_esp_connection
-    global last_esp_display_fingerprint
     global runtime_translate, runtime_target_lang, runtime_context_max
     global runtime_source_lang, runtime_esp_display_mode, runtime_display_fallback
     
@@ -144,18 +142,13 @@ async def websocket_endpoint(websocket: WebSocket):
             active_esp_connection = None
 
     async def push_display_to_esp(text: str, mode: str):
-        global last_esp_display_fingerprint
         if not text:
-            return
-        fingerprint = f"{mode}:{text}"
-        if fingerprint == last_esp_display_fingerprint:
             return
         await send_to_active_esp({
             "message_type": "DisplayText",
             "text": text,
             "mode": mode,
         })
-        last_esp_display_fingerprint = fingerprint
 
     try:
         while True:
