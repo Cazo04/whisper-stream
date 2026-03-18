@@ -280,8 +280,32 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 // Wrap text to fit display width
 void wrapText(String text, std::vector<String>& lines, int maxWidth) {
   lines.clear();
+
   String currentLine = "";
-  
+  String currentWord = "";
+
+  auto pushWord = [&](const String &word) {
+    if (word.length() == 0) {
+      return;
+    }
+
+    if (currentLine.length() == 0) {
+      // Keep whole word on one line even if it overflows width.
+      currentLine = word;
+      return;
+    }
+
+    String candidate = currentLine + " " + word;
+    int candidateWidth = u8g2.getUTF8Width(candidate.c_str());
+
+    if (candidateWidth <= maxWidth) {
+      currentLine = candidate;
+    } else {
+      lines.push_back(currentLine);
+      currentLine = word;
+    }
+  };
+
   for (int i = 0; i < text.length();) {
     int charLen = utf8CharLen((uint8_t)text.charAt(i));
     if (i + charLen > text.length()) {
@@ -289,25 +313,40 @@ void wrapText(String text, std::vector<String>& lines, int maxWidth) {
     }
 
     String ch = text.substring(i, i + charLen);
-    bool isNewline = (charLen == 1 && ch.charAt(0) == '\n');
-    String testLine = currentLine + ch;
-    int width = u8g2.getUTF8Width(testLine.c_str());
-    
-    if (isNewline || width > maxWidth) {
+    bool isAscii = (charLen == 1);
+    bool isNewline = isAscii && (ch.charAt(0) == '\n');
+    bool isSpace = isAscii && (ch.charAt(0) == ' ' || ch.charAt(0) == '\t' || ch.charAt(0) == '\r');
+
+    if (isNewline) {
+      if (currentWord.length() > 0) {
+        pushWord(currentWord);
+        currentWord = "";
+      }
       if (currentLine.length() > 0) {
         lines.push_back(currentLine);
         currentLine = "";
       }
-      if (!isNewline) {
-        currentLine = ch;
-      }
-    } else {
-      currentLine = testLine;
+      i += charLen;
+      continue;
     }
 
+    if (isSpace) {
+      if (currentWord.length() > 0) {
+        pushWord(currentWord);
+        currentWord = "";
+      }
+      i += charLen;
+      continue;
+    }
+
+    currentWord += ch;
     i += charLen;
   }
-  
+
+  if (currentWord.length() > 0) {
+    pushWord(currentWord);
+  }
+
   if (currentLine.length() > 0) {
     lines.push_back(currentLine);
   }
