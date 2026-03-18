@@ -54,6 +54,7 @@ bool isAnimating = false;            // Animation in progress
 unsigned long lastAnimationTime = 0;
 int animationCharIndex = 0;
 int animationCodepointCount = 0;
+int animationViewportStartLine = 0;
 const int ANIMATION_DELAY_MS = 50;   // Delay between characters
 
 // Display mode: true = translated, false = original (thô)
@@ -132,6 +133,7 @@ void queueDisplayText(const String &text)
   isAnimating = true;
   animationCharIndex = 0;
   animationCodepointCount = countUtf8Codepoints(text);
+  animationViewportStartLine = 0;
 }
 
 // Setup I2S peripheral and OLED display, including I2C bus initialization
@@ -354,7 +356,7 @@ void wrapText(String text, std::vector<String>& lines, int maxWidth) {
 }
 
 // Display text with animation and overflow protection
-void displayAnimatedText(String text) {
+void displayAnimatedText(String text, int preferredStartLine = -1) {
   u8g2.clearBuffer();
   
   int displayWidth = u8g2.getDisplayWidth();
@@ -373,6 +375,17 @@ void displayAnimatedText(String text) {
   int startLine = 0;
   if (totalLines > maxLines) {
     startLine = totalLines - maxLines;
+  }
+
+  if (preferredStartLine >= 0) {
+    int maxStart = totalLines > maxLines ? (totalLines - maxLines) : 0;
+    startLine = preferredStartLine;
+    if (startLine < 0) {
+      startLine = 0;
+    }
+    if (startLine > maxStart) {
+      startLine = maxStart;
+    }
   }
   
   // Display only the visible portion
@@ -405,9 +418,26 @@ void updateAnimation() {
       
       // Get partial UTF-8-safe text up to current codepoint index
       String partialText = utf8Prefix(currentDisplayText, animationCharIndex + 1);
+
+      int displayWidth = u8g2.getDisplayWidth();
+      int displayHeight = u8g2.getDisplayHeight();
+      int lineHeight = u8g2.getMaxCharHeight();
+      int maxLines = (displayHeight - 10) / lineHeight;
+
+      std::vector<String> wrappedPreview;
+      wrapText(partialText, wrappedPreview, displayWidth - 5);
+      int targetStartLine = 0;
+      if ((int)wrappedPreview.size() > maxLines) {
+        targetStartLine = (int)wrappedPreview.size() - maxLines;
+      }
+
+      // Scroll upward gradually (line-by-line) as content approaches screen limit.
+      if (targetStartLine > animationViewportStartLine) {
+        animationViewportStartLine++;
+      }
       
       // Display with overflow protection
-      displayAnimatedText(partialText);
+      displayAnimatedText(partialText, animationViewportStartLine);
       
       // Move to next character
       animationCharIndex++;

@@ -109,9 +109,6 @@ async def websocket_endpoint(websocket: WebSocket):
         {"message_type": "SessionBegins", "session_id": str(id(websocket)), "client_type": client_type}
     )
 
-    if is_esp_client:
-        await send_runtime_config(websocket)
-
     assert whisper_engine is not None
     session = StreamingSession(engine=whisper_engine)
 
@@ -163,6 +160,12 @@ async def websocket_endpoint(websocket: WebSocket):
             "text": text,
             "mode": mode,
         })
+
+    if is_esp_client:
+        try:
+            await send_runtime_config(websocket)
+        except Exception as e:
+            logger.info(f"Failed to sync runtime config to ESP session: {e}")
 
     try:
         while True:
@@ -289,7 +292,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             client_type = "esp"
                             is_esp_client = True
                             active_esp_connection = websocket
-                            await send_runtime_config(websocket)
+                            try:
+                                await send_runtime_config(websocket)
+                            except Exception as e:
+                                logger.info(f"Failed to sync runtime config after ESP upgrade: {e}")
 
                     msg_type = msg.get("type")
                     if msg_type == "ping":
