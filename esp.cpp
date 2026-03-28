@@ -4,7 +4,7 @@
 #include "driver/i2s_std.h"
 #include <stdint.h>
 #include <ArduinoJson.h>
-#include <Wire.h>
+#include <SPI.h>
 #include <U8g2lib.h>
 #include <vector>
 
@@ -17,8 +17,12 @@ const char *ws_host = "192.168.1.6";
 const uint16_t ws_port = 8080;
 const char *ws_path = "/wsesp";
 
-#define OLED_SDA 7           // OLED display I2C SDA pin
-#define OLED_SCL 44          // OLED display I2C SCL pin
+// OLED SPI pins for SSD1309 4-wire hardware SPI display
+#define OLED_CLK D8
+#define OLED_MOSI D10
+#define OLED_RES D0
+#define OLED_DC D1
+#define OLED_CS D2
 
 // INMP441 microphone pins: L/R tied to 3.3V for right channel input
 #define I2S_SCK 2            // I2S clock pin
@@ -45,7 +49,7 @@ static float last_filtered_sample = 0.0f;
 const float HPF_ALPHA = 0.98f;       // Filter coefficient
 
 // OLED display controller for showing WiFi, status, and server messages
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
+U8G2_SSD1309_128X64_NONAME0_F_4W_HW_SPI u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RES);
 
 // Display text management
 String currentDisplayText = "";       // Text currently being displayed
@@ -59,6 +63,23 @@ const int ANIMATION_DELAY_MS = 50;   // Delay between characters
 
 // Display mode: true = translated, false = original (thô)
 bool displayTranslated = false;
+
+unsigned long lastI2SErrorLogMs = 0;
+
+void logInfo(const String &msg)
+{
+  Serial.printf("[%10lu][INFO] %s\n", millis(), msg.c_str());
+}
+
+void logWarn(const String &msg)
+{
+  Serial.printf("[%10lu][WARN] %s\n", millis(), msg.c_str());
+}
+
+void logError(const String &msg)
+{
+  Serial.printf("[%10lu][ERR ] %s\n", millis(), msg.c_str());
+}
 
 int utf8CharLen(uint8_t firstByte)
 {
@@ -136,16 +157,16 @@ void queueDisplayText(const String &text)
   animationViewportStartLine = 0;
 }
 
-// Setup I2S peripheral and OLED display, including I2C bus initialization
+// Setup I2S peripheral and OLED display
 void setupI2S()
 {
-  Wire.begin(OLED_SDA, OLED_SCL);   // Initialize I2C for OLED
-  Serial.println("Wire initialized.");
+  SPI.begin(OLED_CLK, -1, OLED_MOSI, OLED_CS);   // Hardware SPI for OLED (no MISO)
+  logInfo("SPI initialized");
 
   u8g2.begin();                     // Initialize OLED display
-  Serial.println("u8g2 initialized.");
+  logInfo("u8g2 initialized");
 
-  Serial.println("Configuring I2S...");
+  logInfo("Configuring I2S");
 
   // I2S RX channel configuration as master capturing from INMP441 mic
   i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
@@ -173,7 +194,7 @@ void setupI2S()
   ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &std_cfg));
   ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
 
-  Serial.println("I2S driver initialized.");
+  logInfo("I2S driver initialized");
 }
 
 bool isStarted = false;  // Flag controlling whether audio is being recorded and sent
@@ -184,30 +205,30 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
   switch (type)
   {
   case WStype_DISCONNECTED:
-    Serial.println("Disconnected!");
+    logWarn("WebSocket disconnected");
     isStarted = false;  // Require explicit esp_start after reconnect
     queueDisplayText("Disconnected!");
     break;
 
   case WStype_CONNECTED:
-    Serial.printf("Connected to url: %s\n", payload);
+    logInfo(String("WebSocket connected: ") + String((char *)payload));
     isStarted = false;  // Start state is controlled by server command
     // Send client type identification
     webSocket.sendTXT("{\"client_type\": \"esp\"}");
+    logInfo("Sent client_type=esp handshake");
     queueDisplayText("Connected!");
     break;
 
   case WStype_TEXT:
   {
-    Serial.println("Received text");
+    logInfo(String("WS text frame received, bytes=") + String(length));
 
     StaticJsonDocument<1024> doc;
     DeserializationError error = deserializeJson(doc, payload, length);
 
     if (error)
     {
-      Serial.print("deserializeJson() failed: ");
-      Serial.println(error.c_str());
+      logError(String("deserializeJson failed: ") + String(error.c_str()));
       return;
     }
 
@@ -221,12 +242,14 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
     {
       isStarted = true;          // Start sending audio data on command
       queueDisplayText("Recording...");
+      logInfo("Received esp_start -> audio streaming enabled");
     }
 
     if (doc.containsKey("stop") || messageType == "esp_stop")
     {
       isStarted = false;         // Stop sending audio data on command
       queueDisplayText("Stopped.");
+      logInfo("Received esp_stop -> audio streaming disabled");
     }
     
     // Handle display mode config
@@ -234,8 +257,7 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
     {
       String mode = doc["esp_display_mode"].as<String>();
       displayTranslated = (mode == "translated");
-      Serial.print("Display mode: ");
-      Serial.println(mode);
+      logInfo(String("Display mode updated: ") + mode);
     }
 
     // Handle DisplayText message (for ESP display)
@@ -243,8 +265,7 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
     {
       String incoming = doc["text"].as<String>();
       queueDisplayText(incoming);
-      Serial.print("Display text: ");
-      Serial.println(incoming);
+      logInfo(String("DisplayText accepted, len=") + String(incoming.length()));
     }
 
     // Display fallback/error messages from server
@@ -252,6 +273,7 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
     {
       String errText = doc.containsKey("text") ? doc["text"].as<String>() : "[display error]";
       queueDisplayText(errText);
+      logWarn(String("DisplayError: ") + errText);
     }
 
     // Handle ConfigAck message
@@ -261,9 +283,15 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
       {
         String mode = doc["esp_display_mode"].as<String>();
         displayTranslated = (mode == "translated");
-        Serial.print("Config ack - Display mode: ");
-        Serial.println(mode);
+        logInfo(String("ConfigAck runtime mode: ") + mode);
       }
+    }
+
+    if (doc.containsKey("message_type") && doc["message_type"] == "RuntimeConfig")
+    {
+      String lang = doc.containsKey("target_lang") ? doc["target_lang"].as<String>() : "na";
+      bool tr = doc.containsKey("translate") ? doc["translate"].as<bool>() : false;
+      logInfo(String("RuntimeConfig synced: translate=") + (tr ? "true" : "false") + ", target=" + lang);
     }
 
     break;
@@ -271,7 +299,7 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 
   case WStype_BIN:
   case WStype_ERROR:
-    Serial.println("WebSocket error");
+    logError("WebSocket error frame");
     isStarted = false;
     queueDisplayText("WS error");
     break;
@@ -454,6 +482,7 @@ void setup()
 {
   Serial.begin(115200);
   delay(1000);
+  logInfo("ESP boot");
 
   setupI2S();
 
@@ -467,16 +496,14 @@ void setup()
   u8g2.sendBuffer();
 
   // Connect to WiFi and wait until connected before proceeding
-  Serial.printf("Connecting to %s ", ssid);
+  logInfo(String("Connecting WiFi SSID: ") + ssid);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
-    Serial.print(".");
   }
-  Serial.println(" CONNECTED!");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  logInfo("WiFi connected");
+  logInfo(String("IP: ") + WiFi.localIP().toString());
 
   // Display WiFi connection status and IP on OLED
   u8g2.clearBuffer();
@@ -494,6 +521,7 @@ void setup()
   webSocket.beginSSL(ws_host, ws_port, ws_path);
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
+  logInfo(String("WS reconnect interval ms=") + String(5000));
 }
 
 void loop()
@@ -549,7 +577,12 @@ void loop()
     }
     else if (result != ESP_OK)
     {
-      Serial.printf("I2S Read Error: %d\n", result);
+      unsigned long now = millis();
+      if (now - lastI2SErrorLogMs >= 1000)
+      {
+        lastI2SErrorLogMs = now;
+        logError(String("I2S read error code=") + String((int)result));
+      }
     }
   }
 }
