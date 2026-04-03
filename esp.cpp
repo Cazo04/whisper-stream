@@ -160,10 +160,8 @@ void queueDisplayText(const String &text)
 // Setup I2S peripheral and OLED display
 void setupI2S()
 {
-  SPI.begin(OLED_CLK, -1, OLED_MOSI, OLED_CS);   // Hardware SPI for OLED (no MISO)
-  logInfo("SPI initialized");
-
   u8g2.begin();                     // Initialize OLED display
+  u8g2.setContrast(255);             // High contrast for transparent OLED
   logInfo("u8g2 initialized");
 
   logInfo("Configuring I2S");
