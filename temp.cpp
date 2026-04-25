@@ -10,8 +10,8 @@
 
 constexpr uint8_t SCREEN_WIDTH = 128;
 constexpr uint8_t SCREEN_HEIGHT = 64;
-constexpr size_t MAX_TEXT_COLUMNS = 16;
-constexpr size_t MAX_TEXT_ROWS = 12;
+constexpr size_t MAX_TEXT_COLUMNS = 32;
+constexpr size_t MAX_TEXT_ROWS = 4;
 constexpr uint8_t TEST_ROWS = 4;
 
 U8G2_SSD1309_128X64_NONAME0_F_4W_HW_SPI u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RES);
@@ -20,10 +20,10 @@ uint8_t visibleColumns = 0;
 uint8_t visibleRows = 0;
 
 const char *kVietnameseGlyphs[] = {
-  "àáảãạăắằẳẵ",
-  "âấầẩẫậđèéẻẽ",
-  "êếềểễệìíỉĩò",
-  "óỏõọôốồổỗộ"
+  "àáảãạăắằẳẵâấầẩẫậ",
+  "âấầẩẫậđèéẻẽ-----",
+  "êếềểễệìíỉĩò-----",
+  "óỏõọôốồổỗộ------"
 };
 
 void setupDisplay()
@@ -93,7 +93,7 @@ void calculateTextCapacity()
   const uint8_t charWidth = u8g2.getMaxCharWidth();
   const uint8_t charHeight = u8g2.getMaxCharHeight();
 
-  visibleColumns = min<uint8_t>(MAX_TEXT_COLUMNS, SCREEN_WIDTH / charWidth);
+  visibleColumns = MAX_TEXT_COLUMNS;
   visibleRows = min<uint8_t>(MAX_TEXT_ROWS, SCREEN_HEIGHT / charHeight);
 
   prepareTextGrid();
