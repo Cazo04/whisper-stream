@@ -24,6 +24,9 @@ const char *ws_path = "/wsesp";
 #define OLED_DC D1
 #define OLED_CS D2
 
+constexpr uint8_t SCREEN_WIDTH = 128;
+constexpr uint8_t SCREEN_HEIGHT = 64;
+
 // INMP441 microphone pins: L/R tied to 3.3V for right channel input
 #define I2S_SCK 2            // I2S clock pin
 #define I2S_WS 3             // I2S word select (LRCLK) pin
@@ -53,8 +56,10 @@ U8G2_SSD1309_128X64_NONAME0_F_4W_HW_SPI u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RES
 
 const int DISPLAY_LEFT_PADDING = 0;
 const int DISPLAY_TOP_PADDING = 2;
-const int DISPLAY_SIDE_MARGIN = 5;
 const int DISPLAY_BOTTOM_MARGIN = 2;
+
+uint8_t contentVisibleColumns = 0;
+uint8_t contentVisibleRows = 0;
 
 // Display text management
 String currentDisplayText = "";       // Text currently being displayed
@@ -172,6 +177,35 @@ void useContentFont()
   u8g2.setFont(u8g2_font_unifont_t_vietnamese2);
 }
 
+void calculateContentCapacity()
+{
+  useContentFont();
+
+  const uint8_t charWidth = max<uint8_t>(1, u8g2.getMaxCharWidth());
+  const uint8_t charHeight = max<uint8_t>(1, u8g2.getMaxCharHeight());
+
+  // temp.cpp proved this display is stable when row/column budget is derived once
+  // from the Vietnamese content font instead of recalculating per frame.
+  const int usableWidth = SCREEN_WIDTH - DISPLAY_LEFT_PADDING;
+  const int usableHeight = SCREEN_HEIGHT - DISPLAY_TOP_PADDING - DISPLAY_BOTTOM_MARGIN;
+
+  contentVisibleColumns = 32;
+  contentVisibleRows = usableHeight / charHeight;
+
+  if (contentVisibleColumns == 0)
+  {
+    contentVisibleColumns = 1;
+  }
+  if (contentVisibleRows == 0)
+  {
+    contentVisibleRows = 1;
+  }
+
+  logInfo(String("Display capacity cols=") + String(contentVisibleColumns) +
+          ", rows=" + String(contentVisibleRows) +
+          ", char=" + String(charWidth) + "x" + String(charHeight));
+}
+
 void drawStatusScreen(const String &line1, const String &line2 = "")
 {
   u8g2.clearBuffer();
@@ -195,6 +229,7 @@ void setupDisplay()
   u8g2.begin();
   u8g2.setContrast(255);
   u8g2.enableUTF8Print();
+  calculateContentCapacity();
   logInfo("u8g2 initialized");
 }
 
@@ -344,38 +379,20 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
   }
 }
 
-// Wrap text to fit display width
-void wrapText(String text, std::vector<String>& lines, int maxWidth) {
+// Wrap UTF-8 text using the font capacity measured from temp.cpp's known-good setup.
+void wrapText(const String &text, std::vector<String> &lines)
+{
   lines.clear();
 
+  const int maxColumns = contentVisibleColumns > 0 ? contentVisibleColumns : 1;
   String currentLine = "";
-  String currentWord = "";
+  int currentColumns = 0;
 
-  auto pushWord = [&](const String &word) {
-    if (word.length() == 0) {
-      return;
-    }
-
-    if (currentLine.length() == 0) {
-      // Keep whole word on one line even if it overflows width.
-      currentLine = word;
-      return;
-    }
-
-    String candidate = currentLine + " " + word;
-    int candidateWidth = u8g2.getUTF8Width(candidate.c_str());
-
-    if (candidateWidth <= maxWidth) {
-      currentLine = candidate;
-    } else {
-      lines.push_back(currentLine);
-      currentLine = word;
-    }
-  };
-
-  for (int i = 0; i < text.length();) {
+  for (int i = 0; i < text.length();)
+  {
     int charLen = utf8CharLen((uint8_t)text.charAt(i));
-    if (i + charLen > text.length()) {
+    if (i + charLen > text.length())
+    {
       charLen = 1;
     }
 
@@ -384,138 +401,152 @@ void wrapText(String text, std::vector<String>& lines, int maxWidth) {
     bool isNewline = isAscii && (ch.charAt(0) == '\n');
     bool isSpace = isAscii && (ch.charAt(0) == ' ' || ch.charAt(0) == '\t' || ch.charAt(0) == '\r');
 
-    if (isNewline) {
-      if (currentWord.length() > 0) {
-        pushWord(currentWord);
-        currentWord = "";
-      }
-      if (currentLine.length() > 0) {
-        lines.push_back(currentLine);
-        currentLine = "";
-      }
+    if (isNewline)
+    {
+      lines.push_back(currentLine);
+      currentLine = "";
+      currentColumns = 0;
       i += charLen;
       continue;
     }
 
-    if (isSpace) {
-      if (currentWord.length() > 0) {
-        pushWord(currentWord);
-        currentWord = "";
-      }
+    if (isSpace && currentColumns == 0)
+    {
       i += charLen;
       continue;
     }
 
-    currentWord += ch;
+    if (currentColumns >= maxColumns)
+    {
+      lines.push_back(currentLine);
+      currentLine = "";
+      currentColumns = 0;
+
+      if (isSpace)
+      {
+        i += charLen;
+        continue;
+      }
+    }
+
+    currentLine += ch;
+    currentColumns++;
     i += charLen;
+
+    if (currentColumns >= maxColumns)
+    {
+      lines.push_back(currentLine);
+      currentLine = "";
+      currentColumns = 0;
+    }
   }
 
-  if (currentWord.length() > 0) {
-    pushWord(currentWord);
-  }
-
-  if (currentLine.length() > 0) {
+  if (currentLine.length() > 0 || lines.empty())
+  {
     lines.push_back(currentLine);
   }
 }
 
 // Display text with animation and overflow protection
-void displayAnimatedText(String text, int preferredStartLine = -1) {
+void displayAnimatedText(String text, int preferredStartLine = -1)
+{
   useContentFont();
   u8g2.clearBuffer();
-  
-  int displayWidth = u8g2.getDisplayWidth();
-  int displayHeight = u8g2.getDisplayHeight();
-  int lineHeight = u8g2.getMaxCharHeight() + 1;
-  int usableHeight = displayHeight - DISPLAY_TOP_PADDING - DISPLAY_BOTTOM_MARGIN;
-  int maxLines = usableHeight / lineHeight;
-  if (maxLines < 1) {
+
+  int lineHeight = u8g2.getMaxCharHeight();
+  int maxLines = contentVisibleRows > 0 ? contentVisibleRows : 1;
+  if (maxLines < 1)
+  {
     maxLines = 1;
   }
-  
-  // Wrap text to fit display
-  std::vector<String> wrappedLines;
-  wrapText(text, wrappedLines, displayWidth - DISPLAY_SIDE_MARGIN);
 
-  if (wrappedLines.empty()) {
+  std::vector<String> wrappedLines;
+  wrapText(text, wrappedLines);
+
+  if (wrappedLines.empty())
+  {
     wrappedLines.push_back("");
   }
-  
-  // Calculate total lines needed
+
   int totalLines = wrappedLines.size();
-  
-  // If text is too long, show only the last maxLines lines
   int startLine = 0;
-  if (totalLines > maxLines) {
+  if (totalLines > maxLines)
+  {
     startLine = totalLines - maxLines;
   }
 
-  if (preferredStartLine >= 0) {
+  if (preferredStartLine >= 0)
+  {
     int maxStart = totalLines > maxLines ? (totalLines - maxLines) : 0;
     startLine = preferredStartLine;
-    if (startLine < 0) {
+    if (startLine < 0)
+    {
       startLine = 0;
     }
-    if (startLine > maxStart) {
+    if (startLine > maxStart)
+    {
       startLine = maxStart;
     }
   }
-  
-  // Display only the visible portion
-  int y = DISPLAY_TOP_PADDING + lineHeight;
-  for (int i = startLine; i < totalLines && i < startLine + maxLines; i++) {
-    u8g2.drawUTF8(DISPLAY_LEFT_PADDING, y, wrappedLines[i].c_str());
-    y += lineHeight;
+
+  for (int row = 0; row < maxLines && (startLine + row) < totalLines; row++)
+  {
+    const uint8_t baseline = DISPLAY_TOP_PADDING + (row + 1) * lineHeight;
+    u8g2.drawUTF8(DISPLAY_LEFT_PADDING, baseline, wrappedLines[startLine + row].c_str());
   }
-  
+
   u8g2.sendBuffer();
 }
 
 // Simple animation update - call this in loop
-void updateAnimation() {
+void updateAnimation()
+{
   unsigned long currentTime = millis();
-  
+
   // Check if there's new text to display
-  if (isAnimating && pendingDisplayText != currentDisplayText) {
+  if (isAnimating && pendingDisplayText != currentDisplayText)
+  {
     // Start new animation
     currentDisplayText = pendingDisplayText;
     animationCharIndex = 0;
     animationCodepointCount = countUtf8Codepoints(currentDisplayText);
   }
-  
+
   // Perform animation step
-  if (isAnimating && currentDisplayText.length() > 0) {
-    if (currentTime - lastAnimationTime >= ANIMATION_DELAY_MS) {
+  if (isAnimating && currentDisplayText.length() > 0)
+  {
+    if (currentTime - lastAnimationTime >= ANIMATION_DELAY_MS)
+    {
       lastAnimationTime = currentTime;
-      
+
       // Get partial UTF-8-safe text up to current codepoint index
       String partialText = utf8Prefix(currentDisplayText, animationCharIndex + 1);
 
-      int displayWidth = u8g2.getDisplayWidth();
-      int displayHeight = u8g2.getDisplayHeight();
-      int lineHeight = u8g2.getMaxCharHeight();
-      int maxLines = (displayHeight - 10) / lineHeight;
-
       std::vector<String> wrappedPreview;
-      wrapText(partialText, wrappedPreview, displayWidth - 5);
+      wrapText(partialText, wrappedPreview);
+
+      int maxLines = contentVisibleRows > 0 ? contentVisibleRows : 1;
       int targetStartLine = 0;
-      if ((int)wrappedPreview.size() > maxLines) {
+      if ((int)wrappedPreview.size() > maxLines)
+      {
         targetStartLine = (int)wrappedPreview.size() - maxLines;
       }
 
       // Scroll upward gradually (line-by-line) as content approaches screen limit.
-      if (targetStartLine > animationViewportStartLine) {
+      if (targetStartLine > animationViewportStartLine)
+      {
         animationViewportStartLine++;
       }
-      
+
       // Display with overflow protection
       displayAnimatedText(partialText, animationViewportStartLine);
-      
+
       // Move to next character
       animationCharIndex++;
-      
+
       // Check if animation is complete
-      if (animationCharIndex >= animationCodepointCount) {
+      if (animationCharIndex >= animationCodepointCount)
+      {
         isAnimating = false;
       }
     }

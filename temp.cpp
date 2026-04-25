@@ -19,6 +19,7 @@ String textGrid[MAX_TEXT_ROWS];
 uint8_t visibleColumns = 0;
 uint8_t visibleRows = 0;
 
+// Kích thước mảng này là đủ màn
 const char *kVietnameseGlyphs[] = {
   "àáảãạăắằẳẵâấầẩẫậ",
   "âấầẩẫậđèéẻẽ-----",
