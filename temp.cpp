@@ -9,15 +9,14 @@
 #define OLED_CS D2
 
 constexpr uint8_t SCREEN_WIDTH = 128;
-constexpr uint8_t PROGRESS_X = 0;
-constexpr uint8_t PROGRESS_Y = 46;
-constexpr uint8_t PROGRESS_WIDTH = SCREEN_WIDTH;
-constexpr uint8_t PROGRESS_HEIGHT = 16;
-constexpr uint8_t PROGRESS_INSET = 3;
-constexpr uint8_t PROGRESS_STEPS = 10;
-constexpr unsigned long FRAME_DELAY_MS = 120;
+constexpr uint8_t SCREEN_HEIGHT = 64;
+constexpr size_t MAX_TEXT_COLUMNS = 32;
+constexpr size_t MAX_TEXT_ROWS = 12;
 
 U8G2_SSD1309_128X64_NONAME0_F_4W_HW_SPI u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RES);
+char textGrid[MAX_TEXT_ROWS][MAX_TEXT_COLUMNS + 1];
+uint8_t visibleColumns = 0;
+uint8_t visibleRows = 0;
 
 void setupDisplay()
 {
@@ -27,35 +26,57 @@ void setupDisplay()
   u8g2.enableUTF8Print();
 }
 
-void useVietnameseFont()
+void useTestFont()
 {
-  u8g2.setFont(u8g2_font_unifont_t_vietnamese2);
+  u8g2.setFont(u8g2_font_5x7_tf);
 }
 
-void drawProgressBar(uint8_t step)
+void prepareTextGrid()
 {
-  const uint8_t clampedStep = min<uint8_t>(step, PROGRESS_STEPS);
-  const uint8_t innerWidth = PROGRESS_WIDTH - (PROGRESS_INSET * 2);
-  const uint8_t fillWidth = (innerWidth * clampedStep) / PROGRESS_STEPS;
-
-  u8g2.drawFrame(PROGRESS_X, PROGRESS_Y, PROGRESS_WIDTH, PROGRESS_HEIGHT);
-  u8g2.drawBox(
-    PROGRESS_X + PROGRESS_INSET,
-    PROGRESS_Y + PROGRESS_INSET,
-    fillWidth,
-    PROGRESS_HEIGHT - (PROGRESS_INSET * 2)
-  );
+  for (uint8_t row = 0; row < visibleRows; ++row)
+  {
+    for (uint8_t col = 0; col < visibleColumns; ++col)
+    {
+      textGrid[row][col] = 'A' + ((row + col) % 26);
+    }
+    textGrid[row][visibleColumns] = '\0';
+  }
 }
 
-void drawScreen(uint8_t progressStep)
+void calculateTextCapacity()
+{
+  useTestFont();
+
+  const uint8_t charWidth = u8g2.getMaxCharWidth();
+  const uint8_t charHeight = u8g2.getMaxCharHeight();
+
+  visibleColumns = min<uint8_t>(MAX_TEXT_COLUMNS, SCREEN_WIDTH / charWidth);
+  visibleRows = min<uint8_t>(MAX_TEXT_ROWS, SCREEN_HEIGHT / charHeight);
+
+  prepareTextGrid();
+
+  Serial.begin(115200);
+  delay(100);
+  Serial.println();
+  Serial.println("OLED text capacity test");
+  Serial.printf("Font: 5x7\n");
+  Serial.printf("Char size: %u x %u px\n", charWidth, charHeight);
+  Serial.printf("Visible columns: %u\n", visibleColumns);
+  Serial.printf("Visible rows: %u\n", visibleRows);
+}
+
+void drawScreen()
 {
   u8g2.clearBuffer();
-  useVietnameseFont();
+  useTestFont();
 
-  u8g2.drawUTF8(0, 14, "Xin chào");
-  u8g2.drawUTF8(0, 30, "XIAO ESP32");
-  u8g2.drawUTF8(0, 44, "Tiếng Việt OK");
-  drawProgressBar(progressStep);
+  const uint8_t lineHeight = u8g2.getMaxCharHeight();
+
+  for (uint8_t row = 0; row < visibleRows; ++row)
+  {
+    const uint8_t baseline = (row + 1) * lineHeight;
+    u8g2.drawStr(0, baseline, textGrid[row]);
+  }
 
   u8g2.sendBuffer();
 }
@@ -63,13 +84,11 @@ void drawScreen(uint8_t progressStep)
 void setup()
 {
   setupDisplay();
+  calculateTextCapacity();
 }
 
 void loop()
 {
-  static uint8_t progressStep = 0;
-
-  drawScreen(progressStep);
-  progressStep = (progressStep + 1) % (PROGRESS_STEPS + 1);
-  delay(FRAME_DELAY_MS);
+  drawScreen();
+  delay(250);
 }
