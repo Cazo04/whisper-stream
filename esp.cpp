@@ -51,6 +51,11 @@ const float HPF_ALPHA = 0.98f;       // Filter coefficient
 // OLED display controller for showing WiFi, status, and server messages
 U8G2_SSD1309_128X64_NONAME0_F_4W_HW_SPI u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RES);
 
+const int DISPLAY_LEFT_PADDING = 0;
+const int DISPLAY_TOP_PADDING = 2;
+const int DISPLAY_SIDE_MARGIN = 5;
+const int DISPLAY_BOTTOM_MARGIN = 2;
+
 // Display text management
 String currentDisplayText = "";       // Text currently being displayed
 String pendingDisplayText = "";      // New text waiting to be displayed
@@ -157,12 +162,45 @@ void queueDisplayText(const String &text)
   animationViewportStartLine = 0;
 }
 
-// Setup I2S peripheral and OLED display
+void useStatusFont()
+{
+  u8g2.setFont(u8g2_font_profont12_tf);
+}
+
+void useContentFont()
+{
+  u8g2.setFont(u8g2_font_unifont_t_vietnamese2);
+}
+
+void drawStatusScreen(const String &line1, const String &line2 = "")
+{
+  u8g2.clearBuffer();
+  useStatusFont();
+
+  int lineHeight = u8g2.getMaxCharHeight() + 2;
+  int baseline = DISPLAY_TOP_PADDING + lineHeight;
+  u8g2.drawUTF8(DISPLAY_LEFT_PADDING, baseline, line1.c_str());
+
+  if (line2.length() > 0)
+  {
+    u8g2.drawUTF8(DISPLAY_LEFT_PADDING, baseline + lineHeight, line2.c_str());
+  }
+
+  u8g2.sendBuffer();
+}
+
+void setupDisplay()
+{
+  SPI.begin(OLED_CLK, -1, OLED_MOSI, OLED_CS);
+  u8g2.begin();
+  u8g2.setContrast(255);
+  u8g2.enableUTF8Print();
+  logInfo("u8g2 initialized");
+}
+
+// Setup I2S peripheral
 void setupI2S()
 {
-  u8g2.begin();                     // Initialize OLED display
-  u8g2.setContrast(255);             // High contrast for transparent OLED
-  logInfo("u8g2 initialized");
 
   logInfo("Configuring I2S");
 
@@ -383,16 +421,25 @@ void wrapText(String text, std::vector<String>& lines, int maxWidth) {
 
 // Display text with animation and overflow protection
 void displayAnimatedText(String text, int preferredStartLine = -1) {
+  useContentFont();
   u8g2.clearBuffer();
   
   int displayWidth = u8g2.getDisplayWidth();
   int displayHeight = u8g2.getDisplayHeight();
-  int lineHeight = u8g2.getMaxCharHeight();
-  int maxLines = (displayHeight - 10) / lineHeight;  // Leave some padding
+  int lineHeight = u8g2.getMaxCharHeight() + 1;
+  int usableHeight = displayHeight - DISPLAY_TOP_PADDING - DISPLAY_BOTTOM_MARGIN;
+  int maxLines = usableHeight / lineHeight;
+  if (maxLines < 1) {
+    maxLines = 1;
+  }
   
   // Wrap text to fit display
   std::vector<String> wrappedLines;
-  wrapText(text, wrappedLines, displayWidth - 5);
+  wrapText(text, wrappedLines, displayWidth - DISPLAY_SIDE_MARGIN);
+
+  if (wrappedLines.empty()) {
+    wrappedLines.push_back("");
+  }
   
   // Calculate total lines needed
   int totalLines = wrappedLines.size();
@@ -415,10 +462,9 @@ void displayAnimatedText(String text, int preferredStartLine = -1) {
   }
   
   // Display only the visible portion
-  int y = 12;  // Start from top with padding
+  int y = DISPLAY_TOP_PADDING + lineHeight;
   for (int i = startLine; i < totalLines && i < startLine + maxLines; i++) {
-    u8g2.setCursor(0, y);
-    u8g2.print(wrappedLines[i]);
+    u8g2.drawUTF8(DISPLAY_LEFT_PADDING, y, wrappedLines[i].c_str());
     y += lineHeight;
   }
   
@@ -482,16 +528,10 @@ void setup()
   delay(1000);
   logInfo("ESP boot");
 
+  setupDisplay();
   setupI2S();
 
-  // Initialize OLED font to support Vietnamese characters
-  u8g2.setFont(u8g2_font_unifont_t_vietnamese2);
-  u8g2.enableUTF8Print();
-  u8g2.setFontMode(0);     // Transparent background for text
-  u8g2.clearBuffer();
-  u8g2.setCursor(0, 15);
-  u8g2.print("Connecting WiFi...");
-  u8g2.sendBuffer();
+  drawStatusScreen("Connecting WiFi...");
 
   // Connect to WiFi and wait until connected before proceeding
   logInfo(String("Connecting WiFi SSID: ") + ssid);
@@ -504,12 +544,7 @@ void setup()
   logInfo(String("IP: ") + WiFi.localIP().toString());
 
   // Display WiFi connection status and IP on OLED
-  u8g2.clearBuffer();
-  u8g2.setCursor(0, 15);
-  u8g2.print("WiFi Connected!");
-  u8g2.setCursor(0, 31);
-  u8g2.print(WiFi.localIP().toString());
-  u8g2.sendBuffer();
+  drawStatusScreen("WiFi Connected!", WiFi.localIP().toString());
 
   delay(2000);
 
