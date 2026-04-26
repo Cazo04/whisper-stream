@@ -26,6 +26,8 @@ const char *ws_path = "/wsesp";
 
 constexpr uint8_t SCREEN_WIDTH = 128;
 constexpr uint8_t SCREEN_HEIGHT = 64;
+constexpr size_t MAX_TEXT_COLUMNS = 32;
+constexpr size_t MAX_TEXT_ROWS = 4;
 
 // INMP441 microphone pins: L/R tied to 3.3V for right channel input
 #define I2S_SCK 2            // I2S clock pin
@@ -53,10 +55,6 @@ const float HPF_ALPHA = 0.98f;       // Filter coefficient
 
 // OLED display controller for showing WiFi, status, and server messages
 U8G2_SSD1309_128X64_NONAME0_F_4W_HW_SPI u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RES);
-
-const int DISPLAY_LEFT_PADDING = 0;
-const int DISPLAY_TOP_PADDING = 2;
-const int DISPLAY_BOTTOM_MARGIN = 2;
 
 uint8_t contentVisibleColumns = 0;
 uint8_t contentVisibleRows = 0;
@@ -167,11 +165,6 @@ void queueDisplayText(const String &text)
   animationViewportStartLine = 0;
 }
 
-void useStatusFont()
-{
-  u8g2.setFont(u8g2_font_profont12_tf);
-}
-
 void useContentFont()
 {
   u8g2.setFont(u8g2_font_unifont_t_vietnamese2);
@@ -181,25 +174,14 @@ void calculateContentCapacity()
 {
   useContentFont();
 
-  const uint8_t charWidth = max<uint8_t>(1, u8g2.getMaxCharWidth());
-  const uint8_t charHeight = max<uint8_t>(1, u8g2.getMaxCharHeight());
+  const uint8_t charWidth = u8g2.getMaxCharWidth();
+  const uint8_t charHeight = u8g2.getMaxCharHeight();
 
-  // temp.cpp proved this display is stable when row/column budget is derived once
-  // from the Vietnamese content font instead of recalculating per frame.
-  const int usableWidth = SCREEN_WIDTH - DISPLAY_LEFT_PADDING;
-  const int usableHeight = SCREEN_HEIGHT - DISPLAY_TOP_PADDING - DISPLAY_BOTTOM_MARGIN;
+  contentVisibleColumns = (uint8_t)MAX_TEXT_COLUMNS;
+  contentVisibleRows = min<uint8_t>((uint8_t)MAX_TEXT_ROWS, SCREEN_HEIGHT / (charHeight > 0 ? charHeight : 1));
 
-  contentVisibleColumns = 32;
-  contentVisibleRows = usableHeight / charHeight;
-
-  if (contentVisibleColumns == 0)
-  {
-    contentVisibleColumns = 1;
-  }
-  if (contentVisibleRows == 0)
-  {
-    contentVisibleRows = 1;
-  }
+  if (contentVisibleColumns == 0) contentVisibleColumns = 1;
+  if (contentVisibleRows == 0) contentVisibleRows = 1;
 
   logInfo(String("Display capacity cols=") + String(contentVisibleColumns) +
           ", rows=" + String(contentVisibleRows) +
@@ -209,15 +191,14 @@ void calculateContentCapacity()
 void drawStatusScreen(const String &line1, const String &line2 = "")
 {
   u8g2.clearBuffer();
-  useStatusFont();
+  useContentFont();
 
-  int lineHeight = u8g2.getMaxCharHeight() + 2;
-  int baseline = DISPLAY_TOP_PADDING + lineHeight;
-  u8g2.drawUTF8(DISPLAY_LEFT_PADDING, baseline, line1.c_str());
+  const uint8_t lineHeight = u8g2.getMaxCharHeight();
+  u8g2.drawUTF8(0, 1 * lineHeight, line1.c_str());
 
   if (line2.length() > 0)
   {
-    u8g2.drawUTF8(DISPLAY_LEFT_PADDING, baseline + lineHeight, line2.c_str());
+    u8g2.drawUTF8(0, 2 * lineHeight, line2.c_str());
   }
 
   u8g2.sendBuffer();
@@ -491,8 +472,8 @@ void displayAnimatedText(String text, int preferredStartLine = -1)
 
   for (int row = 0; row < maxLines && (startLine + row) < totalLines; row++)
   {
-    const uint8_t baseline = DISPLAY_TOP_PADDING + (row + 1) * lineHeight;
-    u8g2.drawUTF8(DISPLAY_LEFT_PADDING, baseline, wrappedLines[startLine + row].c_str());
+    const uint8_t baseline = (uint8_t)((row + 1) * lineHeight);
+    u8g2.drawUTF8(0, baseline, wrappedLines[startLine + row].c_str());
   }
 
   u8g2.sendBuffer();
