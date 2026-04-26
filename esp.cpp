@@ -30,9 +30,9 @@ constexpr size_t MAX_TEXT_COLUMNS = 32;
 constexpr size_t MAX_TEXT_ROWS = 4;
 
 // INMP441 microphone pins: L/R tied to 3.3V for right channel input
-#define I2S_SCK 2            // I2S clock pin
-#define I2S_WS 3             // I2S word select (LRCLK) pin
-#define I2S_SD 5             // I2S data input pin
+#define I2S_SCK 4          // I2S clock pin
+#define I2S_WS 5             // I2S word select (LRCLK) pin
+#define I2S_SD 6             // I2S data input pin
 
 // I2S audio parameters: 16 kHz, 16-bit mono for voice capture
 #define I2S_SAMPLE_RATE 16000
@@ -178,7 +178,7 @@ void calculateContentCapacity()
   const uint8_t charHeight = u8g2.getMaxCharHeight();
 
   contentVisibleColumns = (uint8_t)MAX_TEXT_COLUMNS;
-  contentVisibleRows = min<uint8_t>((uint8_t)MAX_TEXT_ROWS, SCREEN_HEIGHT / (charHeight > 0 ? charHeight : 1));
+  contentVisibleRows = (uint8_t)MAX_TEXT_ROWS;//min<uint8_t>((uint8_t), SCREEN_HEIGHT / (charHeight > 0 ? charHeight : 1));
 
   if (contentVisibleColumns == 0) contentVisibleColumns = 1;
   if (contentVisibleRows == 0) contentVisibleRows = 1;
