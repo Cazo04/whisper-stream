@@ -193,12 +193,15 @@ void drawStatusScreen(const String &line1, const String &line2 = "")
   u8g2.clearBuffer();
   useContentFont();
 
-  const uint8_t lineHeight = u8g2.getMaxCharHeight();
-  u8g2.drawUTF8(0, 1 * lineHeight, line1.c_str());
+  const int ascent       = u8g2.getAscent();
+  const int descent      = u8g2.getDescent();  // negative in u8g2
+  const int firstBaseline = ascent;
+  const int lineSpacing   = (SCREEN_HEIGHT + descent - ascent) / (int)(MAX_TEXT_ROWS - 1);
+  u8g2.drawUTF8(0, (u8g2_uint_t)firstBaseline, line1.c_str());
 
   if (line2.length() > 0)
   {
-    u8g2.drawUTF8(0, 2 * lineHeight, line2.c_str());
+    u8g2.drawUTF8(0, (u8g2_uint_t)(firstBaseline + lineSpacing), line2.c_str());
   }
 
   u8g2.sendBuffer();
@@ -360,72 +363,93 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
   }
 }
 
-// Wrap UTF-8 text using the font capacity measured from temp.cpp's known-good setup.
+// Wrap UTF-8 text with word-aware breaking: never splits a word across lines.
+// Falls back to hard-break only for single words longer than maxCols.
 void wrapText(const String &text, std::vector<String> &lines)
 {
   lines.clear();
 
-  const int maxColumns = contentVisibleColumns > 0 ? contentVisibleColumns : 1;
-  String currentLine = "";
-  int currentColumns = 0;
+  const int maxCols = contentVisibleColumns > 0 ? contentVisibleColumns : 1;
+  String currentLine;
+  int    lineLen = 0;
+  String currentWord;
+  int    wordLen = 0;
 
-  for (int i = 0; i < text.length();)
+  // Flush the accumulated word onto the current display line.
+  // If the word is longer than maxCols it is hard-broken before flushing.
+  auto flushWord = [&]()
   {
-    int charLen = utf8CharLen((uint8_t)text.charAt(i));
-    if (i + charLen > text.length())
+    if (wordLen == 0) return;
+
+    // Hard-break words that exceed the full line width
+    while (wordLen > maxCols)
     {
-      charLen = 1;
+      if (lineLen > 0)
+      {
+        lines.push_back(currentLine);
+        currentLine = "";
+        lineLen = 0;
+      }
+      String piece = utf8Prefix(currentWord, maxCols);
+      lines.push_back(piece);
+      currentWord = currentWord.substring(piece.length());
+      wordLen -= maxCols;
     }
 
-    String ch = text.substring(i, i + charLen);
-    bool isAscii = (charLen == 1);
-    bool isNewline = isAscii && (ch.charAt(0) == '\n');
-    bool isSpace = isAscii && (ch.charAt(0) == ' ' || ch.charAt(0) == '\t' || ch.charAt(0) == '\r');
+    if (lineLen == 0)
+    {
+      currentLine = currentWord;
+      lineLen     = wordLen;
+    }
+    else if (lineLen + 1 + wordLen <= maxCols)
+    {
+      currentLine += ' ';
+      currentLine += currentWord;
+      lineLen     += 1 + wordLen;
+    }
+    else
+    {
+      lines.push_back(currentLine);
+      currentLine = currentWord;
+      lineLen     = wordLen;
+    }
+    currentWord = "";
+    wordLen     = 0;
+  };
+
+  for (int i = 0; i < (int)text.length();)
+  {
+    int charLen = utf8CharLen((uint8_t)text.charAt(i));
+    if (i + charLen > (int)text.length()) charLen = 1;
+
+    char c         = text.charAt(i);
+    bool isAscii   = (charLen == 1);
+    bool isNewline = isAscii && (c == '\n');
+    bool isSpace   = isAscii && (c == ' ' || c == '\t' || c == '\r');
 
     if (isNewline)
     {
+      flushWord();
       lines.push_back(currentLine);
       currentLine = "";
-      currentColumns = 0;
+      lineLen     = 0;
       i += charLen;
       continue;
     }
-
-    if (isSpace && currentColumns == 0)
+    if (isSpace)
     {
+      flushWord();
       i += charLen;
       continue;
     }
-
-    if (currentColumns >= maxColumns)
-    {
-      lines.push_back(currentLine);
-      currentLine = "";
-      currentColumns = 0;
-
-      if (isSpace)
-      {
-        i += charLen;
-        continue;
-      }
-    }
-
-    currentLine += ch;
-    currentColumns++;
+    currentWord += text.substring(i, i + charLen);
+    wordLen++;
     i += charLen;
-
-    if (currentColumns >= maxColumns)
-    {
-      lines.push_back(currentLine);
-      currentLine = "";
-      currentColumns = 0;
-    }
   }
 
+  flushWord();
   if (currentLine.length() > 0 || lines.empty())
-  {
     lines.push_back(currentLine);
-  }
 }
 
 // Display text with animation and overflow protection
@@ -434,12 +458,19 @@ void displayAnimatedText(String text, int preferredStartLine = -1)
   useContentFont();
   u8g2.clearBuffer();
 
-  int lineHeight = u8g2.getMaxCharHeight();
   int maxLines = contentVisibleRows > 0 ? contentVisibleRows : 1;
   if (maxLines < 1)
   {
     maxLines = 1;
   }
+
+  // Distribute rows evenly across 64 px using font metrics so all 4 rows fit.
+  const int ascent        = u8g2.getAscent();
+  const int descent       = u8g2.getDescent();  // negative in u8g2
+  const int firstBaseline = ascent;
+  const int lineSpacing   = (maxLines > 1)
+      ? (SCREEN_HEIGHT + descent - ascent) / (maxLines - 1)
+      : 0;
 
   std::vector<String> wrappedLines;
   wrapText(text, wrappedLines);
@@ -472,7 +503,7 @@ void displayAnimatedText(String text, int preferredStartLine = -1)
 
   for (int row = 0; row < maxLines && (startLine + row) < totalLines; row++)
   {
-    const uint8_t baseline = (uint8_t)((row + 1) * lineHeight);
+    const u8g2_uint_t baseline = (u8g2_uint_t)(firstBaseline + row * lineSpacing);
     u8g2.drawUTF8(0, baseline, wrappedLines[startLine + row].c_str());
   }
 
