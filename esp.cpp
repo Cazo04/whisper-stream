@@ -26,7 +26,7 @@ const char *ws_path = "/wsesp";
 
 constexpr uint8_t SCREEN_WIDTH = 128;
 constexpr uint8_t SCREEN_HEIGHT = 64;
-constexpr size_t MAX_TEXT_COLUMNS = 32;
+constexpr size_t MAX_TEXT_COLUMNS = 16;
 constexpr size_t MAX_TEXT_ROWS = 4;
 
 // INMP441 microphone pins: L/R tied to 3.3V for right channel input
@@ -177,7 +177,7 @@ void calculateContentCapacity()
   const uint8_t charWidth = u8g2.getMaxCharWidth();
   const uint8_t charHeight = u8g2.getMaxCharHeight();
 
-  contentVisibleColumns = (charWidth > 0) ? (SCREEN_WIDTH / charWidth) : (uint8_t)MAX_TEXT_COLUMNS;
+  contentVisibleColumns = (uint8_t)MAX_TEXT_COLUMNS;
   contentVisibleRows = (uint8_t)MAX_TEXT_ROWS;
 
   if (contentVisibleColumns == 0) contentVisibleColumns = 1;
@@ -468,9 +468,7 @@ void displayAnimatedText(String text, int preferredStartLine = -1)
   const int ascent        = u8g2.getAscent();
   const int descent       = u8g2.getDescent();  // negative in u8g2
   const int firstBaseline = ascent;
-  const int lineSpacing   = (maxLines > 1)
-      ? (SCREEN_HEIGHT + descent - ascent) / (maxLines - 1)
-      : 0;
+  const int lineSpacing   = u8g2.getMaxCharHeight();
 
   std::vector<String> wrappedLines;
   wrapText(text, wrappedLines);
@@ -503,7 +501,7 @@ void displayAnimatedText(String text, int preferredStartLine = -1)
 
   for (int row = 0; row < maxLines && (startLine + row) < totalLines; row++)
   {
-    const u8g2_uint_t baseline = (u8g2_uint_t)(firstBaseline + row * lineSpacing);
+    const u8g2_uint_t baseline = (u8g2_uint_t)((row + 1) * lineSpacing);
     u8g2.drawUTF8(0, baseline, wrappedLines[startLine + row].c_str());
   }
 
