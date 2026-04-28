@@ -177,8 +177,8 @@ void calculateContentCapacity()
   const uint8_t charWidth = u8g2.getMaxCharWidth();
   const uint8_t charHeight = u8g2.getMaxCharHeight();
 
-  contentVisibleColumns = (uint8_t)MAX_TEXT_COLUMNS;
-  contentVisibleRows = (uint8_t)MAX_TEXT_ROWS;//min<uint8_t>((uint8_t), SCREEN_HEIGHT / (charHeight > 0 ? charHeight : 1));
+  contentVisibleColumns = (charWidth > 0) ? (SCREEN_WIDTH / charWidth) : (uint8_t)MAX_TEXT_COLUMNS;
+  contentVisibleRows = (uint8_t)MAX_TEXT_ROWS;
 
   if (contentVisibleColumns == 0) contentVisibleColumns = 1;
   if (contentVisibleRows == 0) contentVisibleRows = 1;
