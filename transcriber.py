@@ -98,7 +98,7 @@ class StreamingSession:
     def transcribe_full(self):
         """Single transcription at end-of-utterance — the only Whisper call."""
         if self._write_pos == 0:
-            return "", True
+            return "", None
 
         try:
             audio = self._buffer[:self._write_pos]
@@ -109,14 +109,14 @@ class StreamingSession:
                     f"(probability: {info.language_probability:.2f}), "
                     f"audio: {self._write_pos / self.sample_rate:.1f}s"
                 )
-            return text, True
+            return text, info
         except ValueError as e:
             if "empty sequence" in str(e):
-                return "", True
+                return "", None
             raise
         except Exception as e:
             print(f"Unexpected error during transcription: {e}")
-            return "", True
+            return "", None
 
     def reset(self):
         self._write_pos = 0

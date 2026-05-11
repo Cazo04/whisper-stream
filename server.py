@@ -152,13 +152,14 @@ async def websocket_endpoint(websocket: WebSocket):
             "display_fallback": runtime_display_fallback,
         })
 
-    async def push_display_to_esp(text: str, mode: str):
+    async def push_display_to_esp(text: str, mode: str, lang: str = "en"):
         if not text:
             return
         await send_to_active_esp({
             "message_type": "DisplayText",
             "text": text,
             "mode": mode,
+            "lang": lang,
         })
 
     if is_esp_client:
@@ -217,12 +218,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         if silence_sec >= end_of_utterance_sec:
                             # === Single Whisper call per utterance ===
                             loop = asyncio.get_running_loop()
-                            final_text, _ = await loop.run_in_executor(
+                            final_text, info = await loop.run_in_executor(
                                 executor, session.transcribe_full
                             )
                             if final_text:
                                 utterance_id += 1
                                 translated_text: str | None = None
+                                
+                                detected_lang = info.language if info and hasattr(info, 'language') else "en"
+                                display_lang_original = runtime_source_lang if runtime_source_lang != "auto" else detected_lang
+                                
                                 # Always send FinalTranscript to the connected client
                                 await websocket.send_json(
                                     {
@@ -262,15 +267,15 @@ async def websocket_endpoint(websocket: WebSocket):
                                 # Always update OLED from server-selected output (independent from mic source).
                                 if runtime_esp_display_mode == "translated":
                                     if runtime_translate and translated_text:
-                                        await push_display_to_esp(translated_text, "translated")
+                                        await push_display_to_esp(translated_text, "translated", runtime_target_lang)
                                     elif runtime_translate and runtime_display_fallback == "error":
-                                        await push_display_to_esp("[translate unavailable]", "error")
+                                        await push_display_to_esp("[translate unavailable]", "error", "en")
                                     elif runtime_translate:
-                                        await push_display_to_esp(final_text, "original")
+                                        await push_display_to_esp(final_text, "original", display_lang_original)
                                     else:
-                                        await push_display_to_esp("[translation off]", "error")
+                                        await push_display_to_esp("[translation off]", "error", "en")
                                 else:
-                                    await push_display_to_esp(final_text, "original")
+                                    await push_display_to_esp(final_text, "original", display_lang_original)
 
                             reset_stream_state()
 

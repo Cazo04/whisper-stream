@@ -71,6 +71,7 @@ const int ANIMATION_DELAY_MS = 50;   // Delay between characters
 
 // Display mode: true = translated, false = original (thô)
 bool displayTranslated = false;
+String currentDisplayLang = "en";
 
 unsigned long lastI2SErrorLogMs = 0;
 
@@ -167,7 +168,18 @@ void queueDisplayText(const String &text)
 
 void useContentFont()
 {
-  u8g2.setFont(u8g2_font_unifont_t_vietnamese2);
+  if (currentDisplayLang == "zh" || currentDisplayLang == "zh-Hant" || currentDisplayLang == "yue") {
+    u8g2.setFont(u8g2_font_unifont_t_chinese2);
+  } else if (currentDisplayLang == "ja") {
+    u8g2.setFont(u8g2_font_unifont_t_japanese1);
+  } else if (currentDisplayLang == "ko") {
+    u8g2.setFont(u8g2_font_unifont_t_korean1);
+  } else if (currentDisplayLang == "ru" || currentDisplayLang == "uk" || currentDisplayLang == "kk" || currentDisplayLang == "mn" || currentDisplayLang == "bg") {
+    u8g2.setFont(u8g2_font_unifont_t_cyrillic);
+  } else {
+    // Default to Vietnamese font which covers basic Latin, accented Latin (vi, en, fr, es, etc.)
+    u8g2.setFont(u8g2_font_unifont_t_vietnamese2);
+  }
 }
 
 void calculateContentCapacity()
@@ -319,8 +331,11 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
     if (doc.containsKey("message_type") && doc["message_type"] == "DisplayText")
     {
       String incoming = doc["text"].as<String>();
+      if (doc.containsKey("lang")) {
+        currentDisplayLang = doc["lang"].as<String>();
+      }
       queueDisplayText(incoming);
-      logInfo(String("DisplayText accepted, len=") + String(incoming.length()));
+      logInfo(String("DisplayText accepted, len=") + String(incoming.length()) + ", lang=" + currentDisplayLang);
     }
 
     // Display fallback/error messages from server
