@@ -605,19 +605,22 @@ void loop()
   // Update animation
   updateAnimation();
 
-  if (webSocket.isConnected() && isStarted)
+  size_t bytes_read = 0;
+
+  // Continuously read audio samples from I2S microphone to keep the DMA buffer fresh.
+  // This prevents stale audio or long silences when starting a recording session.
+  // Timeout is 100ms; reading 1600 bytes at 16kHz takes about 50ms, so this will block for ~50ms.
+  esp_err_t result = i2s_channel_read(
+      rx_handle,
+      i2s_read_buffer,
+      I2S_BUFFER_SIZE,
+      &bytes_read,
+      pdMS_TO_TICKS(100));
+
+  if (result == ESP_OK && bytes_read > 0)
   {
-    size_t bytes_read = 0;
-
-    // Read audio samples from I2S microphone with 100ms timeout
-    esp_err_t result = i2s_channel_read(
-        rx_handle,
-        i2s_read_buffer,
-        I2S_BUFFER_SIZE,
-        &bytes_read,
-        pdMS_TO_TICKS(100));
-
-    if (result == ESP_OK && bytes_read > 0)
+    // We have fresh audio data. Only process and send if we are actively recording.
+    if (webSocket.isConnected() && isStarted)
     {
       int num_samples = bytes_read / 2;            // 2 bytes per sample (16-bit)
       int16_t *samples = (int16_t *)i2s_read_buffer;
@@ -626,10 +629,15 @@ void loop()
       for (int i = 0; i < num_samples; i++)
       {
         float current_sample = (float)samples[i];
-        float filtered_sample = HPF_ALPHA * last_filtered_sample + (1.0f - HPF_ALPHA) * current_sample;
-        last_filtered_sample = filtered_sample;
+        
+        // Track the DC offset using a low-pass filter (Exponential Moving Average)
+        float dc_offset = HPF_ALPHA * last_filtered_sample + (1.0f - HPF_ALPHA) * current_sample;
+        last_filtered_sample = dc_offset;
 
-        int32_t boosted_sample = (int32_t)(filtered_sample * GAIN_BOOSTER);
+        // Remove the DC offset to get the high-pass filtered audio
+        float audio_sample = current_sample - dc_offset;
+
+        int32_t boosted_sample = (int32_t)(audio_sample * GAIN_BOOSTER);
 
         // Clamp samples to int16_t range to avoid clipping distortion
         if (boosted_sample > 32767)
@@ -649,14 +657,14 @@ void loop()
       // Send processed audio buffer over WebSocket as binary data
       webSocket.sendBIN((uint8_t *)i2s_read_buffer, bytes_read);
     }
-    else if (result != ESP_OK)
+  }
+  else if (result != ESP_OK && isStarted)
+  {
+    unsigned long now = millis();
+    if (now - lastI2SErrorLogMs >= 1000)
     {
-      unsigned long now = millis();
-      if (now - lastI2SErrorLogMs >= 1000)
-      {
-        lastI2SErrorLogMs = now;
-        logError(String("I2S read error code=") + String((int)result));
-      }
+      lastI2SErrorLogMs = now;
+      logError(String("I2S read error code=") + String((int)result));
     }
   }
 }
