@@ -168,17 +168,23 @@ void queueDisplayText(const String &text)
 
 void useContentFont()
 {
-  if (currentDisplayLang == "zh" || currentDisplayLang == "zh-Hant" || currentDisplayLang == "yue") {
+  if (currentDisplayLang == "zh" || currentDisplayLang == "zh-Hant" || currentDisplayLang == "yue" || currentDisplayLang == "ja") {
+    // wqy16 covers Chinese, Japanese (Kana + Kanji), and all full-width punctuations
     u8g2.setFont(u8g2_font_wqy16_t_gb2312);
-  } else if (currentDisplayLang == "ja") {
-    u8g2.setFont(u8g2_font_unifont_t_japanese1);
+    contentVisibleRows = 3;
   } else if (currentDisplayLang == "ko") {
     u8g2.setFont(u8g2_font_unifont_t_korean1);
+    contentVisibleRows = 3;
+  } else if (currentDisplayLang == "th") {
+    u8g2.setFont(u8g2_font_etl14_t_thai);
+    contentVisibleRows = 4;
   } else if (currentDisplayLang == "ru" || currentDisplayLang == "uk" || currentDisplayLang == "kk" || currentDisplayLang == "mn" || currentDisplayLang == "bg") {
     u8g2.setFont(u8g2_font_unifont_t_cyrillic);
+    contentVisibleRows = 4;
   } else {
     // Default to Vietnamese font which covers basic Latin, accented Latin (vi, en, fr, es, etc.)
     u8g2.setFont(u8g2_font_unifont_t_vietnamese2);
+    contentVisibleRows = 4;
   }
 }
 
