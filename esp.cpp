@@ -129,6 +129,58 @@ int countUtf8Codepoints(const String &text)
   return count;
 }
 
+bool isThaiCombining(uint32_t cp) {
+  return (cp == 0x0E31) || (cp >= 0x0E34 && cp <= 0x0E3A) || (cp >= 0x0E47 && cp <= 0x0E4E);
+}
+
+uint32_t getFirstCodepoint(const String& str) {
+  if (str.length() == 0) return 0;
+  uint8_t c1 = str.charAt(0);
+  if ((c1 & 0x80) == 0x00) return c1;
+  if ((c1 & 0xE0) == 0xC0 && str.length() >= 2) return ((c1 & 0x1F) << 6) | (str.charAt(1) & 0x3F);
+  if ((c1 & 0xF0) == 0xE0 && str.length() >= 3) return ((c1 & 0x0F) << 12) | ((str.charAt(1) & 0x3F) << 6) | (str.charAt(2) & 0x3F);
+  if ((c1 & 0xF8) == 0xF0 && str.length() >= 4) return ((c1 & 0x07) << 18) | ((str.charAt(1) & 0x3F) << 12) | ((str.charAt(2) & 0x3F) << 6) | (str.charAt(3) & 0x3F);
+  return c1;
+}
+
+int getCharWidthFixed(const String& charStr) {
+  uint32_t cp = getFirstCodepoint(charStr);
+  if (isThaiCombining(cp)) return 0;
+  return u8g2.getUTF8Width(charStr.c_str());
+}
+
+void drawTextFixed(int x, int y, const String& text) {
+  int currentX = x;
+  int prevX = x;
+  bool hasUpperVowel = false;
+  
+  for (int i = 0; i < (int)text.length(); ) {
+    int charLen = utf8CharLen((uint8_t)text.charAt(i));
+    if (i + charLen > (int)text.length()) charLen = 1;
+    String charStr = text.substring(i, i + charLen);
+    
+    uint32_t cp = getFirstCodepoint(charStr);
+    
+    if (isThaiCombining(cp)) {
+      int yOffset = 0;
+      if (cp >= 0x0E47 && cp <= 0x0E4E) {
+        if (hasUpperVowel) {
+          yOffset = -4; // Shift tone mark up slightly to avoid overlapping upper vowel
+        }
+      } else if (cp == 0x0E31 || (cp >= 0x0E34 && cp <= 0x0E37) || cp == 0x0E4D) {
+        hasUpperVowel = true;
+      }
+      u8g2.drawUTF8(prevX, y + yOffset, charStr.c_str());
+    } else {
+      hasUpperVowel = false;
+      prevX = currentX;
+      u8g2.drawUTF8(currentX, y, charStr.c_str());
+      currentX += getCharWidthFixed(charStr);
+    }
+    i += charLen;
+  }
+}
+
 String utf8Prefix(const String &text, int codepointCount)
 {
   if (codepointCount <= 0)
@@ -176,7 +228,7 @@ void useContentFont()
     u8g2.setFont(u8g2_font_unifont_t_korean1);
     contentVisibleRows = 3;
   } else if (currentDisplayLang == "th") {
-    u8g2.setFont(u8g2_font_etl14_t_thai);
+    u8g2.setFont(u8g2_font_etl14thai_t);
     contentVisibleRows = 4;
   } else if (currentDisplayLang == "ru" || currentDisplayLang == "uk" || currentDisplayLang == "kk" || currentDisplayLang == "mn" || currentDisplayLang == "bg") {
     u8g2.setFont(u8g2_font_unifont_t_cyrillic);
@@ -215,11 +267,11 @@ void drawStatusScreen(const String &line1, const String &line2 = "")
   const int descent      = u8g2.getDescent();  // negative in u8g2
   const int firstBaseline = ascent;
   const int lineSpacing   = (SCREEN_HEIGHT + descent - ascent) / (int)(MAX_TEXT_ROWS - 1);
-  u8g2.drawUTF8(0, (u8g2_uint_t)firstBaseline, line1.c_str());
+  drawTextFixed(0, (u8g2_uint_t)firstBaseline, line1);
 
   if (line2.length() > 0)
   {
-    u8g2.drawUTF8(0, (u8g2_uint_t)(firstBaseline + lineSpacing), line2.c_str());
+    drawTextFixed(0, (u8g2_uint_t)(firstBaseline + lineSpacing), line2);
   }
 
   u8g2.sendBuffer();
@@ -410,7 +462,7 @@ void wrapText(const String &text, std::vector<String> &lines)
         if (i + charLen > (int)currentWord.length()) charLen = 1;
         
         String charStr = currentWord.substring(i, i + charLen);
-        int charWidth = u8g2.getUTF8Width(charStr.c_str());
+        int charWidth = getCharWidthFixed(charStr);
         
         if (currentLineWidth + charWidth > maxWidth)
         {
@@ -431,7 +483,7 @@ void wrapText(const String &text, std::vector<String> &lines)
     else
     {
       // Normal word fits on a single line
-      int spaceWidth = currentLine.length() > 0 ? u8g2.getUTF8Width(" ") : 0;
+      int spaceWidth = currentLine.length() > 0 ? getCharWidthFixed(" ") : 0;
       if (currentLineWidth + spaceWidth + currentWordWidth <= maxWidth)
       {
         if (currentLine.length() > 0)
@@ -483,7 +535,7 @@ void wrapText(const String &text, std::vector<String> &lines)
     
     String charStr = text.substring(i, i + charLen);
     currentWord += charStr;
-    currentWordWidth += u8g2.getUTF8Width(charStr.c_str());
+    currentWordWidth += getCharWidthFixed(charStr);
     i += charLen;
   }
 
@@ -544,7 +596,7 @@ void displayAnimatedText(String text, int preferredStartLine = -1)
   for (int row = 0; row < maxLines && (startLine + row) < totalLines; row++)
   {
     const u8g2_uint_t baseline = (u8g2_uint_t)((row + 1) * lineSpacing);
-    u8g2.drawUTF8(0, baseline, wrappedLines[startLine + row].c_str());
+    drawTextFixed(0, baseline, wrappedLines[startLine + row]);
   }
 
   u8g2.sendBuffer();
