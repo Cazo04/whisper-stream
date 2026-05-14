@@ -169,7 +169,7 @@ void queueDisplayText(const String &text)
 void useContentFont()
 {
   if (currentDisplayLang == "zh" || currentDisplayLang == "zh-Hant" || currentDisplayLang == "yue") {
-    u8g2.setFont(u8g2_font_unifont_t_chinese2);
+    u8g2.setFont(u8g2_font_wqy16_t_gb2312);
   } else if (currentDisplayLang == "ja") {
     u8g2.setFont(u8g2_font_unifont_t_japanese1);
   } else if (currentDisplayLang == "ko") {
@@ -378,58 +378,74 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
   }
 }
 
-// Wrap UTF-8 text with word-aware breaking: never splits a word across lines.
-// Falls back to hard-break only for single words longer than maxCols.
+// Wrap UTF-8 text using pixel width instead of character count.
+// This ensures CJK and variable-width fonts wrap correctly at the screen edge.
 void wrapText(const String &text, std::vector<String> &lines)
 {
   lines.clear();
 
-  const int maxCols = contentVisibleColumns > 0 ? contentVisibleColumns : 1;
-  String currentLine;
-  int    lineLen = 0;
-  String currentWord;
-  int    wordLen = 0;
+  const int maxWidth = SCREEN_WIDTH;
+  String currentLine = "";
+  int currentLineWidth = 0;
+  
+  String currentWord = "";
+  int currentWordWidth = 0;
 
-  // Flush the accumulated word onto the current display line.
-  // If the word is longer than maxCols it is hard-broken before flushing.
   auto flushWord = [&]()
   {
-    if (wordLen == 0) return;
+    if (currentWord.length() == 0) return;
 
-    // Hard-break words that exceed the full line width
-    while (wordLen > maxCols)
+    // If the word itself is wider than the screen, hard-break it character by character
+    if (currentWordWidth > maxWidth)
     {
-      if (lineLen > 0)
+      for (int i = 0; i < (int)currentWord.length();)
       {
-        lines.push_back(currentLine);
-        currentLine = "";
-        lineLen = 0;
+        int charLen = utf8CharLen((uint8_t)currentWord.charAt(i));
+        if (i + charLen > (int)currentWord.length()) charLen = 1;
+        
+        String charStr = currentWord.substring(i, i + charLen);
+        int charWidth = u8g2.getUTF8Width(charStr.c_str());
+        
+        if (currentLineWidth + charWidth > maxWidth)
+        {
+          if (currentLine.length() > 0) {
+             lines.push_back(currentLine);
+          }
+          currentLine = charStr;
+          currentLineWidth = charWidth;
+        }
+        else
+        {
+          currentLine += charStr;
+          currentLineWidth += charWidth;
+        }
+        i += charLen;
       }
-      String piece = utf8Prefix(currentWord, maxCols);
-      lines.push_back(piece);
-      currentWord = currentWord.substring(piece.length());
-      wordLen -= maxCols;
-    }
-
-    if (lineLen == 0)
-    {
-      currentLine = currentWord;
-      lineLen     = wordLen;
-    }
-    else if (lineLen + 1 + wordLen <= maxCols)
-    {
-      currentLine += ' ';
-      currentLine += currentWord;
-      lineLen     += 1 + wordLen;
     }
     else
     {
-      lines.push_back(currentLine);
-      currentLine = currentWord;
-      lineLen     = wordLen;
+      // Normal word fits on a single line
+      int spaceWidth = currentLine.length() > 0 ? u8g2.getUTF8Width(" ") : 0;
+      if (currentLineWidth + spaceWidth + currentWordWidth <= maxWidth)
+      {
+        if (currentLine.length() > 0)
+        {
+          currentLine += " ";
+          currentLineWidth += spaceWidth;
+        }
+        currentLine += currentWord;
+        currentLineWidth += currentWordWidth;
+      }
+      else
+      {
+        lines.push_back(currentLine);
+        currentLine = currentWord;
+        currentLineWidth = currentWordWidth;
+      }
     }
+    
     currentWord = "";
-    wordLen     = 0;
+    currentWordWidth = 0;
   };
 
   for (int i = 0; i < (int)text.length();)
@@ -437,34 +453,39 @@ void wrapText(const String &text, std::vector<String> &lines)
     int charLen = utf8CharLen((uint8_t)text.charAt(i));
     if (i + charLen > (int)text.length()) charLen = 1;
 
-    char c         = text.charAt(i);
-    bool isAscii   = (charLen == 1);
+    char c = text.charAt(i);
+    bool isAscii = (charLen == 1);
     bool isNewline = isAscii && (c == '\n');
-    bool isSpace   = isAscii && (c == ' ' || c == '\t' || c == '\r');
+    bool isSpace = isAscii && (c == ' ' || c == '\t' || c == '\r');
 
     if (isNewline)
     {
       flushWord();
       lines.push_back(currentLine);
       currentLine = "";
-      lineLen     = 0;
+      currentLineWidth = 0;
       i += charLen;
       continue;
     }
+    
     if (isSpace)
     {
       flushWord();
       i += charLen;
       continue;
     }
-    currentWord += text.substring(i, i + charLen);
-    wordLen++;
+    
+    String charStr = text.substring(i, i + charLen);
+    currentWord += charStr;
+    currentWordWidth += u8g2.getUTF8Width(charStr.c_str());
     i += charLen;
   }
 
   flushWord();
   if (currentLine.length() > 0 || lines.empty())
+  {
     lines.push_back(currentLine);
+  }
 }
 
 // Display text with animation and overflow protection
